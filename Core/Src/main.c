@@ -1,0 +1,646 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file           : main.c
+  * @brief          : DIY MP3 Player
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+#include "main.h"
+
+/* USER CODE BEGIN Includes */
+#include "drv_es8388.h"
+#include <math.h>
+#include "drv_lcd.h"
+#include <string.h>
+#include <stdio.h>
+/* USER CODE END Includes */
+
+/* USER CODE BEGIN PTD */
+/* USER CODE END PTD */
+
+/* USER CODE BEGIN PD */
+#define NAVY_BLUE 0x000F  // Deep navy blue background
+
+#define AUDIO_BUFFER_SIZE  512
+
+#define NOTE_C3  130.81f
+#define NOTE_CS3 138.59f
+#define NOTE_D3  146.83f
+#define NOTE_DS3 155.56f
+#define NOTE_E3  164.81f
+#define NOTE_F3  174.61f
+#define NOTE_FS3 185.00f
+#define NOTE_G3  196.00f
+#define NOTE_GS3 207.65f
+#define NOTE_A3  220.00f
+#define NOTE_AS3 233.08f
+#define NOTE_B3  246.94f
+#define NOTE_C4  261.63f
+#define NOTE_CS4 277.18f
+#define NOTE_D4  293.66f
+#define NOTE_DS4 311.13f
+#define NOTE_E4  329.63f
+#define NOTE_F4  349.23f
+#define NOTE_FS4 369.99f
+#define NOTE_G4  392.00f
+#define NOTE_GS4 415.30f
+#define NOTE_A4  440.00f
+#define NOTE_AS4 466.16f
+#define NOTE_B4  493.88f
+#define NOTE_C5  523.25f
+#define NOTE_CS5 554.37f
+#define NOTE_D5  587.33f
+#define NOTE_DS5 622.25f
+#define NOTE_E5  659.25f
+#define NOTE_F5  698.46f
+#define NOTE_FS5 739.99f
+#define NOTE_G5  783.99f
+#define NOTE_GS5 830.61f
+#define NOTE_A5  880.00f
+#define NOTE_AS5 932.33f
+#define NOTE_B5  987.77f
+#define REST     0.0f
+
+typedef struct {
+    float note;
+    float duration;
+} MusicalNote;
+
+typedef struct {
+    const char* name;
+    const MusicalNote* notes;
+    uint16_t length;
+    uint16_t bpm;
+} Song;
+/* USER CODE END PD */
+
+/* USER CODE BEGIN PM */
+/* USER CODE END PM */
+
+I2C_HandleTypeDef hi2c2;
+I2S_HandleTypeDef hi2s3;
+DMA_HandleTypeDef hdma_spi3_tx;
+SRAM_HandleTypeDef hsram1;
+
+/* USER CODE BEGIN PV */
+uint16_t debug_audio_buffer[AUDIO_BUFFER_SIZE];
+
+/* --- SONG 1 --- */
+const MusicalNote jingle_bells_track[] = {
+    {NOTE_E5, 0.5f}, {NOTE_E5, 0.5f}, {NOTE_E5, 1.0f},
+    {NOTE_E5, 0.5f}, {NOTE_E5, 0.5f}, {NOTE_E5, 1.0f},
+    {NOTE_E5, 0.5f}, {NOTE_G5, 0.5f}, {NOTE_C5, 0.75f}, {NOTE_D5, 0.25f}, {NOTE_E5, 2.0f},
+    {NOTE_F5, 0.5f}, {NOTE_F5, 0.5f}, {NOTE_F5, 0.75f}, {NOTE_F5, 0.25f},
+    {NOTE_F5, 0.5f}, {NOTE_E5, 0.5f}, {NOTE_E5, 0.5f}, {NOTE_E5, 0.25f}, {NOTE_E5, 0.25f},
+    {NOTE_E5, 0.5f}, {NOTE_D5, 0.5f}, {NOTE_D5, 0.5f}, {NOTE_E5, 0.5f}, {NOTE_D5, 1.0f}, {NOTE_G5, 1.0f}
+};
+const Song song_jingle = {
+    .name="Jingle Bells",
+    .notes=jingle_bells_track,
+    .length=sizeof(jingle_bells_track)/sizeof(jingle_bells_track[0]),
+    .bpm=120
+};
+
+/* --- SONG 2 --- */
+const MusicalNote megalovania_track[] = {
+    {NOTE_D4,0.25f},{NOTE_D4,0.25f},{NOTE_D5,0.5f},{NOTE_A4,0.75f},
+    {REST,0.25f},{NOTE_GS4,0.5f},{NOTE_G4,0.5f},{NOTE_F4,0.5f},
+    {NOTE_D4,0.25f},{NOTE_F4,0.25f},{NOTE_G4,0.25f}
+};
+const Song song_megalovania = {
+    .name="Megalovania",
+    .notes=megalovania_track,
+    .length=sizeof(megalovania_track)/sizeof(megalovania_track[0]),
+    .bpm=120
+};
+
+/* --- SONG 3 --- */
+const MusicalNote pirates_track[] = {
+    {NOTE_E4,0.5f},{NOTE_G4,0.5f},{NOTE_A4,1.0f},{NOTE_A4,0.5f},
+    {NOTE_B4,0.5f},{NOTE_C5,1.0f},{NOTE_C5,0.5f},{NOTE_D5,0.5f},
+    {NOTE_B4,1.0f},{NOTE_A4,0.5f},{NOTE_G4,0.5f},{NOTE_A4,1.5f}
+};
+const Song song_pirates = {
+    .name="He's A Pirate",
+    .notes=pirates_track,
+    .length=sizeof(pirates_track)/sizeof(pirates_track[0]),
+    .bpm=140
+};
+
+/* --- SONG 4 --- */
+const MusicalNote harry_track[] = {
+    {NOTE_B4,0.5f},{NOTE_E5,0.75f},{NOTE_G5,0.25f},{NOTE_FS5,0.5f},
+    {NOTE_E5,1.0f},{NOTE_B5,0.5f},{NOTE_A5,1.5f},{NOTE_FS5,1.5f}
+};
+const Song song_harry = {
+    .name="Hedwig's Theme",
+    .notes=harry_track,
+    .length=sizeof(harry_track)/sizeof(harry_track[0]),
+    .bpm=100
+};
+
+/* --- SONG 5 --- */
+const MusicalNote mario_track[] = {
+    {NOTE_E5,0.5f},{NOTE_E5,0.5f},{REST,0.5f},{NOTE_E5,0.5f},{REST,0.5f},{NOTE_C5,0.5f},{NOTE_E5,1.0f},
+    {NOTE_G5,1.5f},{REST,0.5f},{NOTE_G4,1.5f},{REST,0.5f}
+};
+const Song song_mario = {
+    .name="Super Mario",
+    .notes=mario_track,
+    .length=sizeof(mario_track)/sizeof(mario_track[0]),
+    .bpm=150
+};
+
+/* --- SONG 6 --- */
+const MusicalNote starwars_track[] = {
+    {NOTE_D4,0.5f},{NOTE_D4,0.5f},{NOTE_D4,0.5f},{NOTE_G4,2.0f},{NOTE_D5,2.0f},
+    {NOTE_C5,0.5f},{NOTE_B4,0.5f},{NOTE_A4,0.5f},{NOTE_G5,2.0f},{NOTE_D5,1.0f},
+    {NOTE_C5,0.5f},{NOTE_B4,0.5f},{NOTE_A4,0.5f},{NOTE_G5,2.0f},{NOTE_D5,1.0f}
+};
+const Song song_starwars = {
+    .name="Star Wars",
+    .notes=starwars_track,
+    .length=sizeof(starwars_track)/sizeof(starwars_track[0]),
+    .bpm=108
+};
+
+/* --- SONG 7 --- */
+const MusicalNote tetris_track[] = {
+    {NOTE_E5,1.0f},{NOTE_B4,0.5f},{NOTE_C5,0.5f},{NOTE_D5,1.0f},{NOTE_C5,0.5f},{NOTE_B4,0.5f},
+    {NOTE_A4,1.0f},{NOTE_A4,0.5f},{NOTE_C5,0.5f},{NOTE_E5,1.0f},{NOTE_D5,0.5f},{NOTE_C5,0.5f},
+    {NOTE_B4,1.5f},{NOTE_C5,0.5f},{NOTE_D5,1.0f},{NOTE_E5,1.0f}
+};
+const Song song_tetris = {
+    .name="Tetris Theme",
+    .notes=tetris_track,
+    .length=sizeof(tetris_track)/sizeof(tetris_track[0]),
+    .bpm=140
+};
+
+/* --- SONG 8 --- */
+const MusicalNote rickroll_track[] = {
+    {NOTE_D4,0.5f},{NOTE_E4,0.5f},{NOTE_G4,0.5f},{NOTE_E4,0.5f},
+    {NOTE_B4,1.0f},{NOTE_B4,1.0f},{NOTE_A4,2.0f},
+    {NOTE_D4,0.5f},{NOTE_E4,0.5f},{NOTE_G4,0.5f},{NOTE_E4,0.5f},
+    {NOTE_A4,1.0f},{NOTE_A4,1.0f},{NOTE_G4,2.0f}
+};
+const Song song_rickroll = {
+    .name="Rick Roll",
+    .notes=rickroll_track,
+    .length=sizeof(rickroll_track)/sizeof(rickroll_track[0]),
+    .bpm=114
+};
+
+const Song* const playlist[] = {
+    &song_jingle,    &song_megalovania, &song_pirates,   &song_harry,
+    &song_mario,     &song_starwars,    &song_tetris,    &song_rickroll
+};
+#define PLAYLIST_SIZE (sizeof(playlist)/sizeof(playlist[0]))
+
+const Song* volatile current_song    = &song_jingle;
+volatile int8_t      current_song_idx = 0;
+volatile uint8_t     is_paused       = 0;
+uint32_t             current_note_idx = 0;
+uint32_t             samples_elapsed  = 0;
+volatile float       current_freq    = 0.0f;
+float                current_phase   = 0.0f;
+volatile uint8_t     updateLCD       = 0;
+volatile uint8_t     volume_level    = 100;
+volatile uint8_t     vol_mode_active = 0;
+volatile uint8_t     system_ready    = 0;
+/* USER CODE END PV */
+
+void SystemClock_Config(void);
+static void MX_GPIO_Init(void);
+static void MX_DMA_Init(void);
+static void MX_I2C2_Init(void);
+static void MX_I2S3_Init(void);
+static void MX_FSMC_Init(void);
+
+/* USER CODE BEGIN 0 */
+
+/* Forward declarations */
+void Switch_Song(const Song* new_song);
+void Update_LCD_Display(void);
+void Update_Volume_Only(void);
+
+void Switch_Song(const Song* new_song)
+{
+    __disable_irq();
+    current_song      = new_song;
+    current_note_idx  = 0;
+    samples_elapsed   = 0;
+    current_freq      = new_song->notes[0].note;
+    __enable_irq();
+}
+
+void Fill_Audio_Buffer(uint16_t offset, uint16_t length)
+{
+    float    samples_per_beat = (44100.0f * 60.0f) / (float)current_song->bpm;
+    uint32_t gap_samples      = 1323;
+    float    phase_inc        = (2.0f * 3.1415926535f * current_freq) / 44100.0f;
+
+    for (uint16_t i = 0; i < length; i += 2)
+    {
+        if (is_paused) {
+            debug_audio_buffer[offset + i]     = 0;
+            debug_audio_buffer[offset + i + 1] = 0;
+            continue;
+        }
+        samples_elapsed++;
+        MusicalNote active_note     = current_song->notes[current_note_idx];
+        uint32_t    target_duration = (uint32_t)(active_note.duration * samples_per_beat);
+
+        if (samples_elapsed >= (target_duration - gap_samples)) {
+            current_freq = REST;
+            phase_inc    = 0.0f;
+        }
+        if (samples_elapsed >= target_duration) {
+            samples_elapsed = 0;
+            current_note_idx++;
+            if (current_note_idx >= current_song->length) current_note_idx = 0;
+            current_freq = current_song->notes[current_note_idx].note;
+            phase_inc    = (2.0f * 3.1415926535f * current_freq) / 44100.0f;
+        }
+
+        int16_t sample = 0;
+        if (current_freq > 0.0f) {
+            sample = (current_phase < 3.1415926535f) ? 4096 : -4096;
+            current_phase += phase_inc;
+            if (current_phase >= 2.0f * 3.1415926535f)
+                current_phase -= 2.0f * 3.1415926535f;
+        } else {
+            current_phase = 0.0f;
+        }
+        debug_audio_buffer[offset + i]     = (uint16_t)sample;
+        debug_audio_buffer[offset + i + 1] = (uint16_t)sample;
+    }
+}
+
+void HAL_I2S_TxHalfCpltCallback(I2S_HandleTypeDef *hi2s) {
+    Fill_Audio_Buffer(0, AUDIO_BUFFER_SIZE / 2);
+}
+void HAL_I2S_TxCpltCallback(I2S_HandleTypeDef *hi2s) {
+    Fill_Audio_Buffer(AUDIO_BUFFER_SIZE / 2, AUDIO_BUFFER_SIZE / 2);
+}
+
+/* Full screen redraw */
+void Update_LCD_Display(void)
+{
+    lcd_fill(0, 0, 240, 240, NAVY_BLUE);
+
+    /* Header */
+    lcd_set_color(NAVY_BLUE, WHITE);
+    lcd_show_string(0,  0, 16, "==================");
+    lcd_set_color(NAVY_BLUE, WHITE);
+    lcd_show_string(16, 16, 16, "MICHAEL'S PLAYER");
+    lcd_set_color(NAVY_BLUE, WHITE);
+    lcd_show_string(0,  32, 16, "==================");
+
+    /* Status - Vibrant Colors Kept */
+    if (is_paused) {
+        lcd_set_color(NAVY_BLUE, YELLOW);
+        lcd_show_string(60, 56, 24, "[PAUSED]");
+    } else {
+        lcd_set_color(NAVY_BLUE, GREEN);
+        lcd_show_string(52, 56, 24, ">> PLAY <<");
+    }
+
+    /* Track number - Vibrant Color Kept */
+    char track_num[20];
+    snprintf(track_num, 20, "Song  %d / %d", current_song_idx + 1, (int)PLAYLIST_SIZE);
+    lcd_set_color(NAVY_BLUE, CYAN);
+    lcd_show_string(56, 88, 16, track_num);
+
+    lcd_set_color(NAVY_BLUE, WHITE);
+    lcd_show_string(0, 104, 16, "------------------");
+
+    /* Song name auto-split */
+    char name_buf[32];
+    strncpy(name_buf, current_song->name, 31);
+    name_buf[31] = '\0';
+    int len = strlen(name_buf);
+    lcd_set_color(NAVY_BLUE, WHITE);
+    if (len <= 13) {
+        int x = (240 - len * 12) / 2;
+        if (x < 0) x = 0;
+        lcd_show_string(x, 124, 24, name_buf);
+    } else {
+        char line1[17] = {0};
+        char line2[17] = {0};
+        int split = 12;
+        for (int i = 12; i >= 0; i--) {
+            if (name_buf[i] == ' ') { split = i; break; }
+        }
+        strncpy(line1, name_buf, split);
+        strncpy(line2, name_buf + split + 1, 16);
+        int x1 = (240 - (int)strlen(line1) * 12) / 2;
+        int x2 = (240 - (int)strlen(line2) * 12) / 2;
+        if (x1 < 0) x1 = 0;
+        if (x2 < 0) x2 = 0;
+        lcd_show_string(x1, 120, 24, line1);
+        lcd_show_string(x2, 144, 24, line2);
+    }
+
+    /* Footer */
+    lcd_set_color(NAVY_BLUE, WHITE);
+    lcd_show_string(0, 175, 16, "------------------");
+
+    /* Footer Menu - Vibrant Color Kept */
+    lcd_set_color(NAVY_BLUE, MAGENTA);
+    lcd_show_string(4, 192, 16, "[UP] Play / Pause");
+    lcd_show_string(4, 208, 16, "[< >] Prev / Next");
+
+    /* Volume line - Vibrant Color Kept */
+    char vol_buf[20] = {0};
+    snprintf(vol_buf, sizeof(vol_buf), "Volume: %3d%%", volume_level);
+    lcd_set_color(NAVY_BLUE, YELLOW);
+    lcd_show_string(4, 224, 16, vol_buf);
+}
+
+/* Only redraw the volume line — no full screen clear */
+void Update_Volume_Only(void)
+{
+    lcd_fill(0, 224, 240, 240, NAVY_BLUE);
+    char vol_buf[20] = {0};
+    snprintf(vol_buf, sizeof(vol_buf), "Volume: %3d%%", volume_level);
+    lcd_set_color(NAVY_BLUE, YELLOW);
+    lcd_show_string(4, 224, 16, vol_buf);
+}
+
+/* USER CODE END 0 */
+
+int main(void)
+{
+    /* USER CODE BEGIN 1 */
+    /* USER CODE END 1 */
+
+    HAL_Init();
+
+    /* USER CODE BEGIN Init */
+    /* USER CODE END Init */
+
+    SystemClock_Config();
+
+    /* USER CODE BEGIN SysInit */
+    /* USER CODE END SysInit */
+
+    MX_GPIO_Init();
+    MX_DMA_Init();
+    MX_I2C2_Init();
+    MX_I2S3_Init();
+    MX_FSMC_Init();
+
+    /* USER CODE BEGIN 2 */
+    drv_lcd_init();
+
+    /* Splash screen */
+    lcd_clear(NAVY_BLUE);
+    lcd_set_color(NAVY_BLUE, WHITE);
+    lcd_show_string(0,  70, 16, "==================");
+    lcd_set_color(NAVY_BLUE, WHITE);
+    lcd_show_string(16, 88, 16, "MICHAEL'S PLAYER");
+    lcd_set_color(NAVY_BLUE, WHITE);
+    lcd_show_string(0, 104, 16, "==================");
+
+    /* Splash Screen Text - Vibrant Colors Kept */
+    lcd_set_color(NAVY_BLUE, GREEN);
+    lcd_show_string(80, 128, 16, "MP3 PLAYER");
+    lcd_set_color(NAVY_BLUE, YELLOW);
+    lcd_show_string(40, 150, 16, "Booting up...");
+    HAL_Delay(1500);
+
+    es8388_init(&hi2c2);
+    es8388_start(ES_MODE_DAC_ADC);
+    es8388_volume_set(volume_level);
+
+    hdma_spi3_tx.Init.Mode        = DMA_CIRCULAR;
+    hdma_spi3_tx.Init.FIFOMode    = DMA_FIFOMODE_DISABLE;
+    hdma_spi3_tx.Init.MemBurst    = DMA_MBURST_SINGLE;
+    hdma_spi3_tx.Init.PeriphBurst = DMA_PBURST_SINGLE;
+    if (HAL_DMA_Init(&hdma_spi3_tx) != HAL_OK) Error_Handler();
+
+    current_note_idx = 0;
+    samples_elapsed  = 0;
+    current_freq     = current_song->notes[0].note;
+
+    HAL_I2S_Transmit_DMA(&hi2s3, debug_audio_buffer, AUDIO_BUFFER_SIZE);
+    vol_mode_active = 0;
+    Update_LCD_Display();
+    HAL_Delay(500);
+    system_ready = 1;
+    /* USER CODE END 2 */
+
+    /* USER CODE BEGIN WHILE */
+    static uint8_t up_prev    = 0;
+    static uint8_t left_prev  = 0;
+    static uint8_t right_prev = 0;
+    static uint8_t down_prev  = 0;
+    down_prev = !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1); /* seed real state */
+
+    while (1)
+    {
+    /* USER CODE END WHILE */
+    /* USER CODE BEGIN 3 */
+        uint8_t up    = !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_5);
+        uint8_t left  = !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_0);
+        uint8_t right = !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_4);
+        uint8_t down  = !HAL_GPIO_ReadPin(GPIOC, GPIO_PIN_1);
+
+        /* Track DOWN state change — no LCD redraw on mode change */
+        if (system_ready && down != down_prev) {
+            vol_mode_active = down;
+        }
+        down_prev = down;
+
+        /* UP = Play/Pause */
+        if (up && !up_prev) {
+            is_paused = !is_paused;
+            updateLCD = 1;
+        }
+
+        /* RIGHT */
+        if (right && !right_prev) {
+            if (down) {
+                /* Volume up */
+                if (volume_level <= 90) volume_level += 10;
+                es8388_volume_set(volume_level);
+                Update_Volume_Only();
+            } else {
+                /* Next track */
+                current_song_idx++;
+                if (current_song_idx >= (int)PLAYLIST_SIZE) current_song_idx = 0;
+                Switch_Song(playlist[current_song_idx]);
+                is_paused = 0;
+                updateLCD = 1;
+            }
+        }
+
+        /* LEFT */
+        if (left && !left_prev) {
+            if (down) {
+                /* Volume down */
+                if (volume_level >= 10) volume_level -= 10;
+                es8388_volume_set(volume_level);
+                Update_Volume_Only();
+            } else {
+                /* Prev track */
+                current_song_idx--;
+                if (current_song_idx < 0) current_song_idx = PLAYLIST_SIZE - 1;
+                Switch_Song(playlist[current_song_idx]);
+                is_paused = 0;
+                updateLCD = 1;
+            }
+        }
+
+        up_prev    = up;
+        left_prev  = left;
+        right_prev = right;
+        down_prev  = down;
+
+        if (updateLCD) {
+            Update_LCD_Display();
+            updateLCD = 0;
+        }
+
+        HAL_Delay(50);
+    /* USER CODE END 3 */
+    }
+}
+
+void SystemClock_Config(void)
+{
+    RCC_OscInitTypeDef RCC_OscInitStruct = {0};
+    RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
+    __HAL_RCC_PLL_PLLM_CONFIG(10);
+    __HAL_RCC_PLL_PLLSOURCE_CONFIG(RCC_PLLSOURCE_HSI);
+    __HAL_RCC_PWR_CLK_ENABLE();
+    __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
+    RCC_OscInitStruct.OscillatorType      = RCC_OSCILLATORTYPE_HSI;
+    RCC_OscInitStruct.HSIState            = RCC_HSI_ON;
+    RCC_OscInitStruct.HSICalibrationValue = RCC_HSICALIBRATION_DEFAULT;
+    RCC_OscInitStruct.PLL.PLLState        = RCC_PLL_NONE;
+    RCC_OscInitStruct.PLL.PLLSource       = RCC_PLLSOURCE_HSI;
+    if (HAL_RCC_OscConfig(&RCC_OscInitStruct) != HAL_OK) Error_Handler();
+    RCC_ClkInitStruct.ClockType      = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                                      |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+    RCC_ClkInitStruct.SYSCLKSource   = RCC_SYSCLKSOURCE_HSI;
+    RCC_ClkInitStruct.AHBCLKDivider  = RCC_SYSCLK_DIV1;
+    RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
+    RCC_ClkInitStruct.APB2CLKDivider = RCC_HCLK_DIV2;
+    if (HAL_RCC_ClockConfig(&RCC_ClkInitStruct, FLASH_LATENCY_0) != HAL_OK) Error_Handler();
+}
+
+static void MX_I2C2_Init(void)
+{
+    hi2c2.Instance              = I2C2;
+    hi2c2.Init.ClockSpeed       = 100000;
+    hi2c2.Init.DutyCycle        = I2C_DUTYCYCLE_2;
+    hi2c2.Init.OwnAddress1      = 0;
+    hi2c2.Init.AddressingMode   = I2C_ADDRESSINGMODE_7BIT;
+    hi2c2.Init.DualAddressMode  = I2C_DUALADDRESS_DISABLE;
+    hi2c2.Init.OwnAddress2      = 0;
+    hi2c2.Init.GeneralCallMode  = I2C_GENERALCALL_DISABLE;
+    hi2c2.Init.NoStretchMode    = I2C_NOSTRETCH_DISABLE;
+    if (HAL_I2C_Init(&hi2c2) != HAL_OK) Error_Handler();
+}
+
+static void MX_I2S3_Init(void)
+{
+    hi2s3.Instance            = SPI3;
+    hi2s3.Init.Mode           = I2S_MODE_MASTER_TX;
+    hi2s3.Init.Standard       = I2S_STANDARD_PHILIPS;
+    hi2s3.Init.DataFormat     = I2S_DATAFORMAT_16B;
+    hi2s3.Init.MCLKOutput     = I2S_MCLKOUTPUT_ENABLE;
+    hi2s3.Init.AudioFreq      = I2S_AUDIOFREQ_44K;
+    hi2s3.Init.CPOL           = I2S_CPOL_LOW;
+    hi2s3.Init.ClockSource    = I2S_CLOCK_PLL;
+    hi2s3.Init.FullDuplexMode = I2S_FULLDUPLEXMODE_DISABLE;
+    if (HAL_I2S_Init(&hi2s3) != HAL_OK) Error_Handler();
+}
+
+static void MX_DMA_Init(void)
+{
+    __HAL_RCC_DMA1_CLK_ENABLE();
+    HAL_NVIC_SetPriority(DMA1_Stream5_IRQn, 0, 0);
+    HAL_NVIC_EnableIRQ(DMA1_Stream5_IRQn);
+}
+
+static void MX_GPIO_Init(void)
+{
+    GPIO_InitTypeDef GPIO_InitStruct = {0};
+
+    __HAL_RCC_GPIOF_CLK_ENABLE();
+    __HAL_RCC_GPIOC_CLK_ENABLE();
+    __HAL_RCC_GPIOE_CLK_ENABLE();
+    __HAL_RCC_GPIOD_CLK_ENABLE();
+    __HAL_RCC_GPIOA_CLK_ENABLE();
+    __HAL_RCC_GPIOG_CLK_ENABLE();
+    __HAL_RCC_GPIOB_CLK_ENABLE();
+
+    HAL_GPIO_WritePin(GPIOF, GPIO_PIN_9|GPIO_PIN_11, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(GPIOD, GPIO_PIN_3, GPIO_PIN_RESET);
+
+    GPIO_InitStruct.Pin   = GPIO_PIN_9|GPIO_PIN_11;
+    GPIO_InitStruct.Mode  = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull  = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOF, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin   = GPIO_PIN_0|GPIO_PIN_1|GPIO_PIN_4|GPIO_PIN_5;
+    GPIO_InitStruct.Mode  = GPIO_MODE_INPUT;
+    GPIO_InitStruct.Pull  = GPIO_PULLUP;
+    HAL_GPIO_Init(GPIOC, &GPIO_InitStruct);
+
+    GPIO_InitStruct.Pin   = GPIO_PIN_3;
+    GPIO_InitStruct.Mode  = GPIO_MODE_OUTPUT_PP;
+    GPIO_InitStruct.Pull  = GPIO_NOPULL;
+    GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
+    HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+}
+
+static void MX_FSMC_Init(void)
+{
+    FSMC_NORSRAM_TimingTypeDef Timing = {0};
+    hsram1.Instance                   = FSMC_NORSRAM_DEVICE;
+    hsram1.Extended                   = FSMC_NORSRAM_EXTENDED_DEVICE;
+    hsram1.Init.NSBank                = FSMC_NORSRAM_BANK3;
+    hsram1.Init.DataAddressMux        = FSMC_DATA_ADDRESS_MUX_DISABLE;
+    hsram1.Init.MemoryType            = FSMC_MEMORY_TYPE_SRAM;
+
+    /* 8-BIT FIX: This fixes the white static screen bug! */
+    hsram1.Init.MemoryDataWidth       = FSMC_NORSRAM_MEM_BUS_WIDTH_8;
+
+    hsram1.Init.BurstAccessMode       = FSMC_BURST_ACCESS_MODE_DISABLE;
+    hsram1.Init.WaitSignalPolarity    = FSMC_WAIT_SIGNAL_POLARITY_LOW;
+    hsram1.Init.WrapMode              = FSMC_WRAP_MODE_DISABLE;
+    hsram1.Init.WaitSignalActive      = FSMC_WAIT_TIMING_BEFORE_WS;
+    hsram1.Init.WriteOperation        = FSMC_WRITE_OPERATION_ENABLE;
+    hsram1.Init.WaitSignal            = FSMC_WAIT_SIGNAL_DISABLE;
+    hsram1.Init.ExtendedMode          = FSMC_EXTENDED_MODE_DISABLE;
+    hsram1.Init.AsynchronousWait      = FSMC_ASYNCHRONOUS_WAIT_DISABLE;
+    hsram1.Init.WriteBurst            = FSMC_WRITE_BURST_DISABLE;
+    hsram1.Init.PageSize              = FSMC_PAGE_SIZE_NONE;
+    Timing.AddressSetupTime           = 15;
+    Timing.AddressHoldTime            = 15;
+    Timing.DataSetupTime              = 255;
+    Timing.BusTurnAroundDuration      = 15;
+    Timing.CLKDivision                = 16;
+    Timing.DataLatency                = 17;
+    Timing.AccessMode                 = FSMC_ACCESS_MODE_A;
+    if (HAL_SRAM_Init(&hsram1, &Timing, NULL) != HAL_OK) Error_Handler();
+}
+
+/* USER CODE BEGIN 4 */
+/* USER CODE END 4 */
+
+void Error_Handler(void)
+{
+    __disable_irq();
+    while (1) {}
+}
+
+#ifdef USE_FULL_ASSERT
+void assert_failed(uint8_t *file, uint32_t line) {}
+#endif
